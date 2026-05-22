@@ -227,7 +227,8 @@
       <div class="controls">
         <span><span class="key">WASD</span></span><span>Move</span>
         <span><span class="key">Mouse</span></span><span>Look</span>
-        <span><span class="key">Click</span></span><span>Shoot</span>
+        <span><span class="key">Arrows</span></span><span>Look (trackpad)</span>
+        <span><span class="key">Click / F</span></span><span>Shoot</span>
         <span><span class="key">Space</span></span><span>Jump</span>
         <span><span class="key">Shift</span></span><span>Sprint</span>
         <span><span class="key">R</span></span><span>Reload</span>
@@ -521,29 +522,45 @@ function moveWithCollision(obj, dx, dz, radius) {
 // ============================================================
 const keys = Object.create(null);
 let pointerLocked = false;
-const SENS = 0.0022;
+const SENS = 0.004;       // pointer-lock sensitivity (bumped for trackpads)
+const ARROW_TURN = 2.6;   // radians/sec when arrow keys held
 
 document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyR') tryReload();
+  if (e.code === 'KeyF') state.firing = true; // alt-fire key
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
+    e.preventDefault();
+  }
+  if (e.code === 'Escape' && state.alive && !state.gameOver) showMenu(true);
 });
-document.addEventListener('keyup',   (e) => { keys[e.code] = false; });
+document.addEventListener('keyup', (e) => {
+  keys[e.code] = false;
+  if (e.code === 'KeyF') state.firing = false;
+});
+
+function clampPitch() {
+  pitchObject.rotation.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitchObject.rotation.x));
+}
 
 renderer.domElement.addEventListener('mousemove', (e) => {
   if (!pointerLocked) return;
   yawObject.rotation.y -= e.movementX * SENS;
   pitchObject.rotation.x -= e.movementY * SENS;
-  pitchObject.rotation.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitchObject.rotation.x));
+  clampPitch();
 });
 
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === renderer.domElement;
-  if (!pointerLocked && state.alive && !state.gameOver) showMenu(true);
 });
 
 renderer.domElement.addEventListener('mousedown', (e) => {
-  if (!pointerLocked) return;
-  if (e.button === 0) state.firing = true;
+  if (e.button !== 0) return;
+  state.firing = true;
+  // try to grab pointer lock if not already locked (re-request on click)
+  if (!pointerLocked && state.alive && !state.gameOver) {
+    renderer.domElement.requestPointerLock?.();
+  }
 });
 renderer.domElement.addEventListener('mouseup', (e) => {
   if (e.button === 0) state.firing = false;
@@ -1046,8 +1063,15 @@ function loop(now) {
   last = now;
   state.time += dt;
 
-  if (pointerLocked && state.alive) {
+  if (state.alive && !state.gameOver) {
     updatePlayer(dt);
+
+    // arrow keys to look (trackpad-friendly fallback)
+    if (keys['ArrowLeft'])  yawObject.rotation.y += ARROW_TURN * dt;
+    if (keys['ArrowRight']) yawObject.rotation.y -= ARROW_TURN * dt;
+    if (keys['ArrowUp'])    pitchObject.rotation.x += ARROW_TURN * 0.7 * dt;
+    if (keys['ArrowDown'])  pitchObject.rotation.x -= ARROW_TURN * 0.7 * dt;
+    clampPitch();
   }
 
   // update bots
