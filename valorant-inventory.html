@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>VL Inventory :: Concept</title>
+<style>
+  /* ---------- ImGui-flavored theme ---------- */
+  :root {
+    --bg:        #1f1f23;
+    --panel:     #26262b;
+    --panel-2:   #2c2c33;
+    --panel-3:   #34343c;
+    --border:    #0f0f12;
+    --text:      #d6d6d6;
+    --text-dim:  #8b8b94;
+    --accent:    #ff4655;     /* Valorant red */
+    --accent-2:  #4d8df6;     /* ImGui-ish blue */
+    --good:      #4caf50;
+    --warn:      #f0a020;
+    --header:    #3a3a44;
+    --header-h:  #4a4a56;
+    --header-a:  #ff4655;
+    --grab:      #4d8df6;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #101013;
+    color: var(--text);
+    font-family: "Cousine", "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+    font-size: 13px;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* outer "viewport" */
+  #viewport {
+    width: 100%; height: 100%;
+    background:
+      radial-gradient(ellipse at 30% 0%, #1c1c22 0%, #0c0c10 60%) ;
+    position: relative;
+    padding: 24px;
+  }
+
+  /* main window */
+  .win {
+    position: absolute;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+    display: flex; flex-direction: column;
+  }
+  .win-title {
+    background: linear-gradient(180deg, #3a3a44, #2e2e36);
+    color: #fff;
+    padding: 4px 8px;
+    font-weight: bold;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    cursor: default;
+  }
+  .win-title.active {
+    background: linear-gradient(180deg, #ff4655, #b8333d);
+  }
+  .win-title .dot {
+    width: 8px; height: 8px; background: #ff4655; display: inline-block;
+  }
+  .win-title .spacer { flex: 1; }
+  .win-title .btn {
+    width: 16px; height: 14px;
+    background: #4a4a56; color: #fff;
+    text-align: center; line-height: 14px; font-size: 10px;
+    cursor: pointer;
+  }
+  .win-title .btn:hover { background: #6a6a78; }
+
+  .win-body {
+    flex: 1; overflow: hidden; display: flex;
+    background: var(--bg);
+  }
+
+  /* main layout */
+  #main {
+    top: 24px; left: 24px;
+    width: calc(100% - 48px); height: calc(100% - 48px);
+  }
+
+  /* tab bar */
+  .tabbar {
+    display: flex; background: #1a1a1f;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 6px 14px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-weight: bold;
+    letter-spacing: 0.3px;
+  }
+  .tab.active {
+    background: var(--bg);
+    color: var(--accent);
+    box-shadow: inset 0 2px 0 var(--accent);
+  }
+  .tab:hover:not(.active) { color: #fff; }
+
+  /* columns */
+  .col {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 6px;
+  }
+  .col:last-child { border-right: none; }
+
+  #col-cat   { width: 220px; }
+  #col-skin  { width: 280px; }
+  #col-prev  { flex: 1; padding: 0; background: var(--bg); }
+  #col-prop  { width: 280px; }
+
+  /* scrollbar */
+  .col::-webkit-scrollbar { width: 14px; }
+  .col::-webkit-scrollbar-track { background: var(--panel); }
+  .col::-webkit-scrollbar-thumb {
+    background: var(--header); border: 3px solid var(--panel);
+  }
+  .col::-webkit-scrollbar-thumb:hover { background: var(--header-h); }
+
+  /* collapsing headers */
+  .header {
+    background: var(--header);
+    color: #fff;
+    padding: 4px 6px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    font-weight: bold;
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid transparent;
+  }
+  .header:hover { background: var(--header-h); }
+  .header .arrow {
+    display: inline-block; width: 10px;
+    transition: transform 0.1s linear;
+  }
+  .header.open .arrow { transform: rotate(90deg); }
+  .header-body { padding: 2px 0 6px 14px; display: none; }
+  .header.open + .header-body { display: block; }
+
+  /* selectable rows */
+  .row {
+    padding: 3px 6px;
+    cursor: pointer;
+    color: var(--text);
+    display: flex; justify-content: space-between; align-items: center;
+    border: 1px solid transparent;
+  }
+  .row:hover { background: #34343c; }
+  .row.sel  { background: var(--accent); color: #fff; }
+  .row.sel .meta { color: rgba(255,255,255,0.85); }
+  .row .meta { color: var(--text-dim); font-size: 11px; }
+
+  /* property block */
+  .group {
+    background: var(--panel-2);
+    padding: 6px;
+    margin-bottom: 6px;
+    border: 1px solid var(--border);
+  }
+  .group h4 {
+    margin: 0 0 6px 0; padding: 0 0 4px 0;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; letter-spacing: 0.5px;
+  }
+  .field { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .field label { width: 88px; color: var(--text-dim); }
+  .field .val   { flex: 1; }
+
+  /* slider */
+  .slider {
+    flex: 1; height: 18px; background: var(--panel-3);
+    border: 1px solid var(--border); position: relative; cursor: pointer;
+  }
+  .slider .fill {
+    position: absolute; top: 0; left: 0; bottom: 0;
+    background: var(--grab);
+  }
+  .slider .lbl {
+    position: relative; text-align: center; line-height: 16px;
+    color: #fff; font-size: 11px;
+  }
+
+  /* checkbox */
+  .check {
+    width: 14px; height: 14px;
+    background: var(--panel-3); border: 1px solid var(--border);
+    display: inline-block; cursor: pointer;
+    text-align: center; line-height: 12px; color: var(--accent-2);
+    font-size: 12px; font-weight: bold;
+  }
+
+  /* radio buttons (level/chroma) */
+  .pills { display: flex; gap: 2px; flex-wrap: wrap; }
+  .pill {
+    padding: 2px 8px; background: var(--panel-3);
+    border: 1px solid var(--border); cursor: pointer;
+    color: var(--text-dim); font-size: 11px;
+  }
+  .pill:hover { color: #fff; }
+  .pill.on   { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* button */
+  .btn-x {
+    display: inline-block; padding: 4px 10px;
+    background: var(--panel-3); border: 1px solid var(--border);
+    color: #fff; cursor: pointer; font-weight: bold;
+  }
+  .btn-x:hover { background: var(--header-h); }
+  .btn-x.primary { background: var(--accent); border-color: #b8333d; }
+  .btn-x.primary:hover { background: #ff5e6c; }
+
+  /* preview canvas */
+  #stage {
+    width: 100%; height: 100%;
+    display: block;
+    background:
+      radial-gradient(ellipse at center, #2a2a32 0%, #15151a 80%);
+  }
+  #col-prev {
+    position: relative;
+    display: flex; flex-direction: column;
+  }
+  .prev-toolbar {
+    background: #1a1a1f;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: center;
+    color: var(--text-dim);
+  }
+  .prev-toolbar .sep {
+    width: 1px; height: 14px; background: var(--border);
+  }
+  .prev-stage { flex: 1; position: relative; overflow: hidden; }
+
+  /* skin name overlay */
+  .skin-card {
+    position: absolute; left: 16px; bottom: 16px;
+    background: rgba(15,15,18,0.85);
+    border: 1px solid var(--border);
+    padding: 8px 12px; min-width: 280px;
+    backdrop-filter: blur(2px);
+  }
+  .skin-card .line  { color: var(--text-dim); font-size: 11px; letter-spacing: 1px; }
+  .skin-card .name  { color: #fff; font-size: 18px; font-weight: bold; margin: 2px 0; }
+  .skin-card .price { color: var(--warn); font-size: 12px; }
+  .rarity-bar {
+    height: 3px; margin-top: 6px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+  }
+
+  /* status bar */
+  .statusbar {
+    height: 22px; background: #15151a;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 8px; color: var(--text-dim); font-size: 11px;
+  }
+  .statusbar .k { color: var(--accent-2); }
+  .statusbar .ok { color: var(--good); }
+  .statusbar .sep { width: 1px; height: 12px; background: var(--border); }
+
+  /* watermark / disclaimer */
+  .watermark {
+    position: absolute; right: 12px; top: 6px;
+    color: var(--text-dim); font-size: 10px; letter-spacing: 1px;
+    pointer-events: none;
+  }
+  .disclaimer {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: 4px; font-size: 10px; color: #6a6a72; letter-spacing: 1px;
+    pointer-events: none;
+  }
+
+  /* tooltip-ish drag handles look */
+  .resize {
+    position: absolute; width: 4px; top: 0; bottom: 0; right: -2px;
+    cursor: ew-resize;
+  }
+
+  /* small text helpers */
+  .dim { color: var(--text-dim); }
+  .acc { color: var(--accent); }
+  .acc2 { color: var(--accent-2); }
+  .mini { font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="viewport">
+
+  <div class="win" id="main">
+    <div class="win-title active">
+      <span class="dot"></span>
+      <span>VL Inventory  ::  Skin Preview Concept</span>
+      <span class="spacer"></span>
+      <span class="dim mini">v0.1.0-concept</span>
+      <span class="btn" title="collapse">_</span>
+      <span class="btn" title="maximize">[]</span>
+      <span class="btn" title="close">x</span>
+    </div>
+
+    <div class="tabbar">
+      <div class="tab active" data-tab="inv">Inventory</div>
+      <div class="tab" data-tab="loadout">Loadout</div>
+      <div class="tab" data-tab="buddies">Buddies</div>
+      <div class="tab" data-tab="sprays">Sprays</div>
+      <div class="tab" data-tab="cards">Player Cards</div>
+      <div class="tab" data-tab="settings">Settings</div>
+    </div>
+
+    <div class="win-body">
+
+      <!-- ============ COL 1 :: WEAPONS ============ -->
+      <div class="col" id="col-cat"></div>
+
+      <!-- ============ COL 2 :: SKINS ============ -->
+      <div class="col" id="col-skin"></div>
+
+      <!-- ============ COL 3 :: PREVIEW ============ -->
+      <div class="col" id="col-prev">
+        <div class="prev-toolbar">
+          <span class="acc">[viewport]</span>
+          <span class="sep"></span>
+          <span class="dim">rotate:</span>
+          <span class="check" data-flag="rotate">x</span>
+          <span class="sep"></span>
+          <span class="dim">grid:</span>
+          <span class="check" data-flag="grid">x</span>
+          <span class="sep"></span>
+          <span class="dim">fov:</span>
+          <div class="slider" data-slider="fov" style="width:100px;">
+            <div class="fill" style="width:55%;"></div>
+            <div class="lbl">55</div>
+          </div>
+          <span class="sep"></span>
+          <span class="dim">zoom:</span>
+          <div class="slider" data-slider="zoom" style="width:100px;">
+            <div class="fill" style="width:50%;"></div>
+            <div class="lbl">1.00x</div>
+          </div>
+          <span class="spacer"></span>
+          <span class="dim">render:</span>
+          <span class="ok">ONLINE</span>
+        </div>
+
+        <div class="prev-stage">
+          <canvas id="stage"></canvas>
+          <div class="watermark">CONCEPT BUILD :: NOT AFFILIATED WITH RIOT GAMES</div>
+          <div class="skin-card">
+            <div class="line">SELECTED SKIN</div>
+            <div class="name" id="skin-name">— none —</div>
+            <div class="line"><span id="skin-line">—</span></div>
+            <div class="price" id="skin-price">— VP</div>
+            <div class="rarity-bar" id="rarity-bar"></div>
+          </div>
+          <div class="disclaimer">UI MOCKUP &mdash; FOR DESIGN DEMONSTRATION ONLY</div>
+        </div>
+      </div>
+
+      <!-- ============ COL 4 :: PROPERTIES ============ -->
+      <div class="col" id="col-prop">
+        <div class="group">
+          <h4>// SKIN VARIANTS</h4>
+
+          <div class="field">
+            <label>Level</label>
+            <div class="val pills" id="pills-level"></div>
+          </div>
+          <div class="field">
+            <label>Chroma</label>
+            <div class="val pills" id="pills-chroma"></div>
+          </div>
+          <div class="field">
+            <label>Tint hue</label>
+            <div class="val">
+              <div class="slider" data-slider="hue">
+                <div class="fill" style="width:50%;"></div>
+                <div class="lbl">0&deg;</div>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label>Saturation</label>
+            <div class="val">
+              <div class="slider" data-slider="sat">
+                <div class="fill" style="width:100%;"></div>
+                <div class="lbl">100%</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>// VFX &amp; AUDIO</h4>
+          <div class="field">
+            <label>Muzzle FX</label>
+            <span class="check on" data-flag="muzzle">x</span>
+            <span class="dim mini">enabled</span>
+          </div>
+          <div class="field">
+            <label>Tracer</label>
+            <span class="check on" data-flag="tracer">x</span>
+            <span class="dim mini">enabled</span>
+          </div>
+          <div class="field">
+            <label>Kill banner</label>
+            <span class="check on" data-flag="banner">x</span>
+            <span class="dim mini">enabled</span>
+          </div>
+          <div class="field">
+            <label>Equip SFX</label>
+            <span class="check on" data-flag="equip">x</span>
+            <span class="dim mini">enabled</span>
+          </div>
+          <div class="field">
+            <label>Inspect</label>
+            <span class="btn-x" id="btn-inspect">play anim</span>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>// BUDDY (charm)</h4>
+          <div class="field">
+            <label>Equipped</label>
+            <div class="val" id="buddy-name">none</div>
+          </div>
+          <div class="field">
+            <label>Position</label>
+            <div class="val pills">
+              <div class="pill on">left</div>
+              <div class="pill">right</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>// ACTIONS</h4>
+          <div class="field">
+            <span class="btn-x primary" id="btn-apply">[ Apply to loadout ]</span>
+          </div>
+          <div class="field">
+            <span class="btn-x" id="btn-reset">reset</span>
+            <span class="btn-x" id="btn-favorite">favorite</span>
+            <span class="btn-x" id="btn-random">random</span>
+          </div>
+          <div class="dim mini" style="margin-top:6px;">
+            * Concept demo: changes affect this preview only. No game data is read or written.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- status bar -->
+    <div class="statusbar">
+      <span><span class="k">[mode]</span> <span class="ok">PREVIEW</span></span>
+      <span class="sep"></span>
+      <span><span class="k">[fps]</span> <span id="fps">60</span></span>
+      <span class="sep"></span>
+      <span><span class="k">[draw]</span> <span id="draws">0</span></span>
+      <span class="sep"></span>
+      <span><span class="k">[selected]</span> <span id="status-sel">—</span></span>
+      <span class="sep"></span>
+      <span class="dim">drag preview to rotate &mdash; scroll to zoom</span>
+      <span style="flex:1;"></span>
+      <span class="dim">imgui-style :: cousine 13px</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+ * Data: weapon catalog + skin catalog (concept data)
+ * Skin/weapon names are widely known community references;
+ * everything renders as stylized vectors, no game assets used.
+ * ========================================================= */
+const CATALOG = {
+  "Sidearms": [
+    { id:"classic",  name:"Classic"  },
+    { id:"shorty",   name:"Shorty"   },
+    { id:"frenzy",   name:"Frenzy"   },
+    { id:"ghost",    name:"Ghost"    },
+    { id:"sheriff",  name:"Sheriff"  },
+  ],
+  "SMGs": [
+    { id:"stinger",  name:"Stinger"  },
+    { id:"spectre",  name:"Spectre"  },
+  ],
+  "Shotguns": [
+    { id:"bucky",    name:"Bucky"    },
+    { id:"judge",    name:"Judge"    },
+  ],
+  "Rifles": [
+    { id:"bulldog",  name:"Bulldog"  },
+    { id:"guardian", name:"Guardian" },
+    { id:"phantom",  name:"Phantom"  },
+    { id:"vandal",   name:"Vandal"   },
+  ],
+  "Snipers": [
+    { id:"marshal",  name:"Marshal"  },
+    { id:"outlaw",   name:"Outlaw"   },
+    { id:"operator", name:"Operator" },
+  ],
+  "Heavies": [
+    { id:"ares",     name:"Ares"     },
+    { id:"odin",     name:"Odin"     },
+  ],
+  "Melee": [
+    { id:"knife",    name:"Melee"    },
+  ],
+};
+
+/* For each weapon id, a list of skins. Each skin has:
+ *  - line   (skin family name)
+ *  - rarity (Select / Deluxe / Premium / Exclusive / Ultra)
+ *  - price  (VP, conceptual)
+ *  - levels (1..n)
+ *  - chromas: array of color objects { name, base, accent, glow }
+ */
+function s(line, rarity, price, levels, chromas){
+  return { line, rarity, price, levels, chromas };
+}
+const C = {
+  std:   { name:"Standard", base:"#3b3b3b", accent:"#6a6a6a", glow:"#888"     },
+  red:   { name:"Red",      base:"#7a1f24", accent:"#ff4655", glow:"#ff6b78" },
+  blue:  { name:"Blue",     base:"#1f3a7a", accent:"#4d8df6", glow:"#7ab0ff" },
+  cyan:  { name:"Cyan",     base:"#0d4d52", accent:"#33e1eb", glow:"#9ff5fb" },
+  gold:  { name:"Gold",     base:"#5a4413", accent:"#f0c040", glow:"#ffe48a" },
+  green: { name:"Green",    base:"#1d4d22", accent:"#5cd06a", glow:"#a9efb1" },
+  pink:  { name:"Pink",     base:"#5a1f4a", accent:"#ff60c0", glow:"#ffb4e0" },
+  purple:{ name:"Purple",   base:"#3a1f5a", accent:"#9c5cff", glow:"#d4b4ff" },
+  black: { name:"Onyx",     base:"#0d0d10", accent:"#252528", glow:"#3a3a40" },
+  white: { name:"Polar",    base:"#dcdcdc", accent:"#ffffff", glow:"#ffffff" },
+  acid:  { name:"Acid",     base:"#2c4a0e", accent:"#aff020", glow:"#dcff70" },
+  void:  { name:"Void",     base:"#15102a", accent:"#7a3cff", glow:"#b48aff" },
+};
+
+const SKINS = {
+  vandal: [
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red, C.green, C.blue]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan, C.pink]),
+    s("Oni",          "Premium",  1775, 5, [C.red, C.purple, C.cyan]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan, C.gold]),
+    s("Ion",          "Premium",  1775, 5, [C.cyan, C.gold, C.pink]),
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white, C.red]),
+    s("RGX 11z Pro",  "Exclusive",2175, 5, [C.cyan, C.gold, C.red]),
+    s("Recon",        "Deluxe",   1275, 4, [C.std, C.blue, C.green]),
+    s("Singularity",  "Ultra",    2475, 5, [C.void, C.red, C.cyan, C.gold]),
+    s("Champions 2022","Ultra",   2675, 5, [C.gold]),
+  ],
+  phantom: [
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red, C.green, C.blue]),
+    s("Oni",          "Premium",  1775, 5, [C.red, C.purple, C.cyan]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan, C.pink]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan, C.gold]),
+    s("Ion",          "Premium",  1775, 5, [C.cyan, C.gold]),
+    s("Spline",       "Deluxe",   1275, 4, [C.cyan, C.purple, C.green]),
+    s("Forsaken",     "Premium",  1775, 5, [C.gold, C.purple, C.red]),
+  ],
+  operator: [
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan, C.pink]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red, C.green]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan, C.gold]),
+    s("Ion",          "Premium",  1775, 5, [C.cyan, C.gold]),
+    s("Elderflame",   "Ultra",    2475, 5, [C.red, C.gold, C.purple]),
+    s("Singularity",  "Ultra",    2475, 5, [C.void, C.red, C.cyan]),
+  ],
+  sheriff: [
+    s("Magepunk",     "Premium",  1775, 5, [C.cyan, C.pink, C.gold]),
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white, C.red]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan, C.pink]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+    s("Singularity",  "Ultra",    2475, 5, [C.void, C.red]),
+  ],
+  ghost: [
+    s("Oni",          "Premium",  1775, 5, [C.red, C.purple, C.cyan]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red, C.green]),
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white]),
+    s("Spline",       "Deluxe",   1275, 4, [C.cyan, C.purple]),
+  ],
+  classic: [
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+    s("Magepunk",     "Premium",  1775, 5, [C.cyan, C.pink, C.gold]),
+  ],
+  shorty: [
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan]),
+  ],
+  frenzy: [
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+    s("Ion",          "Premium",  1775, 5, [C.cyan, C.gold]),
+  ],
+  stinger: [
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+    s("Recon",        "Deluxe",   1275, 4, [C.std, C.blue, C.green]),
+  ],
+  spectre: [
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+    s("Ion",          "Premium",  1775, 5, [C.cyan, C.gold]),
+    s("Magepunk",     "Premium",  1775, 5, [C.cyan, C.pink]),
+  ],
+  bucky: [
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan]),
+  ],
+  judge: [
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan]),
+  ],
+  bulldog: [
+    s("Recon",        "Deluxe",   1275, 4, [C.std, C.blue]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+  ],
+  guardian: [
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white]),
+  ],
+  marshal: [
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan]),
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white]),
+  ],
+  outlaw: [
+    s("Araxys",       "Ultra",    2475, 5, [C.red, C.cyan, C.gold]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+  ],
+  ares: [
+    s("Recon",        "Deluxe",   1275, 4, [C.std, C.green]),
+    s("Glitchpop",    "Premium",  1775, 5, [C.pink, C.cyan]),
+  ],
+  odin: [
+    s("Sovereign",    "Premium",  1775, 5, [C.gold, C.white]),
+    s("Prime",        "Premium",  1775, 5, [C.gold, C.cyan]),
+    s("Reaver",       "Premium",  1775, 5, [C.purple, C.red]),
+  ],
+  knife: [
+    s("Reaver Karambit","Exclusive",4350, 1, [C.purple, C.red, C.cyan, C.green]),
+    s("Prime Axe",      "Exclusive",4350, 1, [C.gold, C.cyan, C.pink]),
+    s("Oni Tantō",      "Exclusive",4350, 1, [C.red, C.purple]),
+    s("Recon Combat",   "Deluxe",   3550, 1, [C.std, C.blue, C.green]),
+  ],
+};
+
+const RARITY_COLOR = {
+  "Select":    "#5cd06a",
+  "Deluxe":    "#33b6e1",
+  "Premium":   "#c660b3",
+  "Exclusive": "#ff7a3c",
+  "Ultra":     "#ffd34d",
+};
+
+/* =========================================================
+ * Render: collapsing weapon list
+ * ========================================================= */
+const colCat  = document.getElementById("col-cat");
+const colSkin = document.getElementById("col-skin");
+
+const state = {
+  weapon: "vandal",
+  skinIdx: 0,
+  level: 5,
+  chroma: 0,
+  hue: 0,
+  sat: 100,
+  fov: 55,
+  zoom: 1.0,
+  rotate: true,
+  grid: true,
+  rotAngle: 0,
+  dragRot: 0,
+  flags: { muzzle:true, tracer:true, banner:true, equip:true },
+  fps: 0,
+  draws: 0,
+};
+
+function buildCategories(){
+  colCat.innerHTML = "";
+  // header bar
+  const top = document.createElement("div");
+  top.innerHTML = '<div class="dim mini" style="padding:4px 6px;">// WEAPONS</div>';
+  colCat.appendChild(top);
+
+  Object.entries(CATALOG).forEach(([cat, list], i) => {
+    const h = document.createElement("div");
+    h.className = "header" + (i < 4 ? " open" : "");
+    h.innerHTML = '<span class="arrow">&#9656;</span><span>'+cat+'</span>'+
+                  '<span class="dim mini" style="margin-left:auto;">'+list.length+'</span>';
+    h.addEventListener("click", () => h.classList.toggle("open"));
+    colCat.appendChild(h);
+
+    const body = document.createElement("div");
+    body.className = "header-body";
+    list.forEach(w => {
+      const r = document.createElement("div");
+      r.className = "row" + (w.id === state.weapon ? " sel" : "");
+      r.innerHTML = '<span>'+w.name+'</span>' +
+                    '<span class="meta">'+(SKINS[w.id]||[]).length+' skins</span>';
+      r.addEventListener("click", () => {
+        state.weapon = w.id; state.skinIdx = 0; state.level = pickMaxLevel();
+        state.chroma = 0;
+        buildCategories(); buildSkins(); refreshProps(); updateCard();
+      });
+      body.appendChild(r);
+    });
+    colCat.appendChild(body);
+  });
+}
+
+function pickMaxLevel(){
+  const sk = SKINS[state.weapon] && SKINS[state.weapon][state.skinIdx];
+  return sk ? sk.levels : 5;
+}
+
+function buildSkins(){
+  colSkin.innerHTML = "";
+  const head = document.createElement("div");
+  head.innerHTML = '<div class="dim mini" style="padding:4px 6px;">// '+
+    state.weapon.toUpperCase()+' SKINS</div>';
+  colSkin.appendChild(head);
+
+  const list = SKINS[state.weapon] || [];
+  // group by rarity
+  const groups = {};
+  list.forEach((sk, i) => {
+    (groups[sk.rarity] = groups[sk.rarity] || []).push({sk, i});
+  });
+  const order = ["Ultra","Exclusive","Premium","Deluxe","Select"];
+  order.forEach(rar => {
+    if (!groups[rar]) return;
+    const h = document.createElement("div");
+    h.className = "header open";
+    h.innerHTML = '<span class="arrow">&#9656;</span>'+
+      '<span style="color:'+RARITY_COLOR[rar]+'">'+rar+'</span>'+
+      '<span class="dim mini" style="margin-left:auto;">'+groups[rar].length+'</span>';
+    h.addEventListener("click", () => h.classList.toggle("open"));
+    colSkin.appendChild(h);
+
+    const body = document.createElement("div");
+    body.className = "header-body";
+    groups[rar].forEach(({sk,i}) => {
+      const r = document.createElement("div");
+      r.className = "row" + (i === state.skinIdx ? " sel" : "");
+      r.innerHTML =
+        '<span>'+sk.line+'</span>' +
+        '<span class="meta">'+sk.price+' VP</span>';
+      r.addEventListener("click", () => {
+        state.skinIdx = i;
+        state.level = sk.levels;
+        state.chroma = 0;
+        buildSkins(); refreshProps(); updateCard();
+      });
+      body.appendChild(r);
+    });
+    colSkin.appendChild(body);
+  });
+}
+
+/* =========================================================
+ * Properties panel: levels, chromas, sliders
+ * ========================================================= */
+function currentSkin(){
+  const list = SKINS[state.weapon] || [];
+  return list[state.skinIdx];
+}
+function currentChroma(){
+  const sk = currentSkin();
+  if (!sk) return C.std;
+  return sk.chromas[state.chroma] || sk.chromas[0] || C.std;
+}
+
+function refreshProps(){
+  const sk = currentSkin();
+  const lvl = document.getElementById("pills-level");
+  const chr = document.getElementById("pills-chroma");
+  lvl.innerHTML = ""; chr.innerHTML = "";
+  if (!sk) return;
+  for (let i=1;i<=sk.levels;i++){
+    const p = document.createElement("div");
+    p.className = "pill" + (i === state.level ? " on" : "");
+    p.textContent = "L"+i;
+    p.addEventListener("click", () => { state.level = i; refreshProps(); updateCard(); });
+    lvl.appendChild(p);
+  }
+  sk.chromas.forEach((c, i) => {
+    const p = document.createElement("div");
+    p.className = "pill" + (i === state.chroma ? " on" : "");
+    p.textContent = c.name;
+    p.style.background = (i === state.chroma) ? c.accent : "";
+    p.style.borderColor = (i === state.chroma) ? c.accent : "";
+    p.addEventListener("click", () => { state.chroma = i; refreshProps(); updateCard(); });
+    chr.appendChild(p);
+  });
+  document.getElementById("buddy-name").textContent =
+    (state.weapon === "knife") ? "— (melee)" :
+    ["Tetherball","Penguin","Riot Shield","Rubber Ducky","D.Va Bunny"]
+      [state.skinIdx % 5];
+}
+
+/* =========================================================
+ * Skin card overlay
+ * ========================================================= */
+function updateCard(){
+  const sk = currentSkin();
+  const w = (CATALOG_FLAT[state.weapon] || {name:"—"});
+  document.getElementById("status-sel").textContent =
+    (sk ? sk.line : "—") + " :: " + w.name + " :: L" + state.level;
+  if (!sk){
+    document.getElementById("skin-name").textContent = "— none —";
+    document.getElementById("skin-line").textContent = "—";
+    document.getElementById("skin-price").textContent = "— VP";
+    return;
+  }
+  document.getElementById("skin-name").textContent = sk.line + " " + w.name;
+  document.getElementById("skin-line").textContent =
+    sk.rarity.toUpperCase() + "  ::  Level " + state.level + " / " + sk.levels +
+    "  ::  " + currentChroma().name;
+  document.getElementById("skin-price").textContent = sk.price + " VP";
+  document.getElementById("rarity-bar").style.background =
+    "linear-gradient(90deg, " + RARITY_COLOR[sk.rarity] + ", transparent)";
+}
+const CATALOG_FLAT = {};
+Object.values(CATALOG).flat().forEach(w => CATALOG_FLAT[w.id] = w);
+
+/* =========================================================
+ * Tabs (visual only for non-Inventory)
+ * ========================================================= */
+document.querySelectorAll(".tab").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    if (t.dataset.tab !== "inv"){
+      // soft toast in card
+      document.getElementById("skin-name").textContent =
+        "[ "+t.dataset.tab.toUpperCase()+" ]";
+      document.getElementById("skin-line").textContent =
+        "section stub :: not implemented in concept";
+    } else {
+      updateCard();
+    }
+  });
+});
+
+/* =========================================================
+ * Sliders (drag)
+ * ========================================================= */
+function bindSlider(el, opts){
+  let dragging = false;
+  function setFromX(x){
+    const r = el.getBoundingClientRect();
+    let pct = Math.max(0, Math.min(1, (x - r.left) / r.width));
+    const v = opts.min + (opts.max - opts.min) * pct;
+    opts.set(v, pct);
+    el.querySelector(".fill").style.width = (pct*100)+"%";
+    el.querySelector(".lbl").textContent = opts.fmt(v);
+  }
+  el.addEventListener("mousedown", e => { dragging = true; setFromX(e.clientX); });
+  window.addEventListener("mousemove", e => { if (dragging) setFromX(e.clientX); });
+  window.addEventListener("mouseup",   () => { dragging = false; });
+}
+bindSlider(document.querySelector('[data-slider="fov"]'), {
+  min:30, max:120, fmt:v=>Math.round(v),
+  set:v => state.fov = v,
+});
+bindSlider(document.querySelector('[data-slider="zoom"]'), {
+  min:0.5, max:2.5, fmt:v=>v.toFixed(2)+"x",
+  set:v => state.zoom = v,
+});
+bindSlider(document.querySelector('[data-slider="hue"]'), {
+  min:-180, max:180, fmt:v=>Math.round(v)+"\u00b0",
+  set:v => state.hue = v,
+});
+bindSlider(document.querySelector('[data-slider="sat"]'), {
+  min:0, max:200, fmt:v=>Math.round(v)+"%",
+  set:v => state.sat = v,
+});
+
+/* checkboxes */
+document.querySelectorAll(".check").forEach(c => {
+  c.addEventListener("click", () => {
+    c.classList.toggle("on");
+    const f = c.dataset.flag;
+    if (f === "rotate") state.rotate = c.classList.contains("on");
+    else if (f === "grid")   state.grid   = c.classList.contains("on");
+    else if (f) state.flags[f] = c.classList.contains("on");
+    c.textContent = c.classList.contains("on") ? "x" : "";
+  });
+  // initialize
+  if (c.dataset.flag === "rotate" || c.dataset.flag === "grid"){
+    c.classList.add("on"); c.textContent = "x";
+  }
+});
+
+/* buttons */
+document.getElementById("btn-apply").addEventListener("click", () => {
+  toast("loadout updated (concept)");
+});
+document.getElementById("btn-reset").addEventListener("click", () => {
+  state.level = pickMaxLevel(); state.chroma = 0;
+  state.hue = 0; state.sat = 100;
+  document.querySelector('[data-slider="hue"] .fill').style.width = "50%";
+  document.querySelector('[data-slider="hue"] .lbl').textContent = "0\u00b0";
+  document.querySelector('[data-slider="sat"] .fill').style.width = "100%";
+  document.querySelector('[data-slider="sat"] .lbl').textContent = "100%";
+  refreshProps(); updateCard();
+});
+document.getElementById("btn-favorite").addEventListener("click", () => toast("favorited"));
+document.getElementById("btn-random").addEventListener("click", () => {
+  const list = SKINS[state.weapon] || [];
+  state.skinIdx = Math.floor(Math.random() * list.length);
+  const sk = list[state.skinIdx];
+  state.level = sk.levels;
+  state.chroma = Math.floor(Math.random() * sk.chromas.length);
+  buildSkins(); refreshProps(); updateCard();
+});
+document.getElementById("btn-inspect").addEventListener("click", () => {
+  inspectAnim = 1.0;
+});
+function toast(msg){
+  document.getElementById("status-sel").innerHTML =
+    '<span style="color:var(--good)">'+msg+'</span>';
+  setTimeout(updateCard, 1500);
+}
+
+/* =========================================================
+ * Canvas preview
+ * ========================================================= */
+const stage = document.getElementById("stage");
+const sx    = stage.getContext("2d");
+function resize(){
+  const r = stage.getBoundingClientRect();
+  stage.width  = Math.max(300, r.width  * devicePixelRatio);
+  stage.height = Math.max(200, r.height * devicePixelRatio);
+}
+window.addEventListener("resize", resize);
+
+/* mouse drag rotation */
+let mDown = false, mX = 0;
+stage.addEventListener("mousedown", e => { mDown = true; mX = e.clientX; });
+window.addEventListener("mouseup", () => mDown = false);
+window.addEventListener("mousemove", e => {
+  if (!mDown) return;
+  state.dragRot += (e.clientX - mX) * 0.01;
+  mX = e.clientX;
+});
+stage.addEventListener("wheel", e => {
+  e.preventDefault();
+  state.zoom = Math.max(0.4, Math.min(3, state.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+  document.querySelector('[data-slider="zoom"] .fill').style.width =
+    (((state.zoom-0.5)/2.0)*100)+"%";
+  document.querySelector('[data-slider="zoom"] .lbl').textContent =
+    state.zoom.toFixed(2)+"x";
+}, { passive:false });
+
+/* ---- weapon shape drawers (stylized vector silhouettes) ---- */
+function drawGrid(g, w, h){
+  g.strokeStyle = "rgba(255,255,255,0.04)";
+  g.lineWidth = 1;
+  for (let x=0; x<w; x+=40){ g.beginPath(); g.moveTo(x,0); g.lineTo(x,h); g.stroke(); }
+  for (let y=0; y<h; y+=40){ g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke(); }
+  // axis
+  g.strokeStyle = "rgba(77,141,246,0.4)";
+  g.beginPath(); g.moveTo(0,h/2); g.lineTo(w,h/2); g.stroke();
+  g.beginPath(); g.moveTo(w/2,0); g.lineTo(w/2,h); g.stroke();
+}
+
+function applyTint(color){
+  // returns adjusted color via simple HSL shift using a temp element
+  const d = document.createElement("div");
+  d.style.color = color;
+  document.body.appendChild(d);
+  const rgb = getComputedStyle(d).color;
+  document.body.removeChild(d);
+  const m = rgb.match(/\d+/g).map(Number);
+  let [r,g,b] = m;
+  // saturation
+  const lum = 0.3*r + 0.59*g + 0.11*b;
+  const s = state.sat / 100;
+  r = lum + (r - lum) * s;
+  g = lum + (g - lum) * s;
+  b = lum + (b - lum) * s;
+  // hue rotation (cheap)
+  if (state.hue !== 0){
+    const a = state.hue * Math.PI / 180;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const rr = r * (0.299 + 0.701*cos + 0.168*sin) +
+               g * (0.587 - 0.587*cos + 0.330*sin) +
+               b * (0.114 - 0.114*cos - 0.497*sin);
+    const gg = r * (0.299 - 0.299*cos - 0.328*sin) +
+               g * (0.587 + 0.413*cos + 0.035*sin) +
+               b * (0.114 - 0.114*cos + 0.292*sin);
+    const bb = r * (0.299 - 0.300*cos + 1.250*sin) +
+               g * (0.587 - 0.588*cos - 1.050*sin) +
+               b * (0.114 + 0.886*cos - 0.203*sin);
+    r = rr; g = gg; b = bb;
+  }
+  r = Math.max(0, Math.min(255, r|0));
+  g = Math.max(0, Math.min(255, g|0));
+  b = Math.max(0, Math.min(255, b|0));
+  return "rgb("+r+","+g+","+b+")";
+}
+
+let inspectAnim = 0;
+
+function drawWeapon(g, kind, color){
+  // generic stylized silhouettes per weapon family.
+  // base is body color, accent is highlight, glow is rim lighting.
+  const base   = applyTint(color.base);
+  const accent = applyTint(color.accent);
+  const glow   = applyTint(color.glow);
+
+  g.save();
+  g.lineJoin = "round";
+  g.lineCap  = "round";
+  g.lineWidth = 2;
+
+  // glow halo
+  const halo = g.createRadialGradient(0,0,10,0,0,260);
+  halo.addColorStop(0, "rgba(255,255,255,0.06)");
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = halo;
+  g.fillRect(-400,-200,800,400);
+
+  function body(path, fill, stroke){
+    g.fillStyle = fill;
+    g.strokeStyle = stroke || "rgba(0,0,0,0.6)";
+    g.beginPath(); path(); g.closePath(); g.fill(); g.stroke();
+  }
+
+  // outlines for different weapon kinds
+  if (kind === "vandal" || kind === "phantom" || kind === "bulldog" || kind === "guardian"){
+    // long rifle
+    body(()=>{
+      g.moveTo(-220,-12); g.lineTo(110,-12); g.lineTo(160,-22); g.lineTo(220,-22);
+      g.lineTo(220,-8);   g.lineTo(180,-8);  g.lineTo(150, 0);  g.lineTo(110, 8);
+      g.lineTo( 60, 8);   g.lineTo( 50, 30); g.lineTo(-30, 30); g.lineTo(-40, 8);
+      g.lineTo(-110, 8);  g.lineTo(-130, 24);g.lineTo(-180,30); g.lineTo(-220,12);
+    }, base);
+    // mag
+    body(()=>{ g.moveTo(-10,8); g.lineTo(30,8); g.lineTo(28,52); g.lineTo(-12,52); }, accent);
+    // scope/sight
+    body(()=>{ g.moveTo(-30,-12); g.lineTo(40,-12); g.lineTo(40,-30); g.lineTo(-30,-30); }, accent);
+    // grip
+    body(()=>{ g.moveTo(-60,8); g.lineTo(-30,8); g.lineTo(-20,40); g.lineTo(-70,40); }, accent);
+    // barrel highlight
+    g.strokeStyle = glow; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(60,-6); g.lineTo(210,-15); g.stroke();
+  }
+  else if (kind === "operator" || kind === "marshal" || kind === "outlaw"){
+    // sniper
+    body(()=>{
+      g.moveTo(-260,-8); g.lineTo(160,-8); g.lineTo(220,-18); g.lineTo(260,-18);
+      g.lineTo(260,-2);  g.lineTo(220,-2); g.lineTo(160, 6);  g.lineTo( 50, 6);
+      g.lineTo( 40, 28); g.lineTo(-40, 28);g.lineTo(-50, 6);  g.lineTo(-260,16);
+    }, base);
+    // big scope
+    body(()=>{
+      g.moveTo(-90,-10); g.lineTo(70,-10); g.lineTo(70,-44); g.lineTo(-90,-44);
+    }, accent);
+    body(()=>{
+      g.arc(-80,-26, 10, 0, Math.PI*2);
+    }, glow);
+    body(()=>{
+      g.arc(60,-26, 10, 0, Math.PI*2);
+    }, glow);
+    // bipod
+    g.strokeStyle = accent; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(140,8); g.lineTo(120,40); g.moveTo(160,8); g.lineTo(180,40); g.stroke();
+  }
+  else if (kind === "sheriff" || kind === "ghost" || kind === "classic" || kind === "frenzy"){
+    // pistol
+    body(()=>{
+      g.moveTo(-90,-6); g.lineTo( 80,-6); g.lineTo(110,-14); g.lineTo(140,-14);
+      g.lineTo(140, 0); g.lineTo(110, 0); g.lineTo( 80, 8);  g.lineTo( 30, 8);
+      g.lineTo( 10, 60);g.lineTo(-50, 60); g.lineTo(-60, 8); g.lineTo(-90, 8);
+    }, base);
+    body(()=>{ g.moveTo(-30,8); g.lineTo(10,8); g.lineTo(8,52); g.lineTo(-28,52); }, accent);
+    body(()=>{ g.moveTo(-10,-6); g.lineTo(50,-6); g.lineTo(50,-18); g.lineTo(-10,-18); }, accent);
+  }
+  else if (kind === "shorty"){
+    // sawed-off
+    body(()=>{
+      g.moveTo(-90,-10); g.lineTo(70,-10); g.lineTo(90,-18); g.lineTo(110,-18);
+      g.lineTo(110,-2);  g.lineTo(70, 4);  g.lineTo( 20, 12); g.lineTo( 0, 56);
+      g.lineTo(-60, 56); g.lineTo(-70, 12);g.lineTo(-90, 12);
+    }, base);
+    body(()=>{ g.arc(95,-10,7,0,Math.PI*2); }, glow);
+  }
+  else if (kind === "stinger" || kind === "spectre"){
+    // smg, compact
+    body(()=>{
+      g.moveTo(-150,-10); g.lineTo(120,-10); g.lineTo(150,-20); g.lineTo(180,-20);
+      g.lineTo(180,-6);   g.lineTo(150,-6);  g.lineTo(120, 4);  g.lineTo( 30, 4);
+      g.lineTo( 20, 32);  g.lineTo(-30, 32); g.lineTo(-40, 4);  g.lineTo(-150,12);
+    }, base);
+    body(()=>{ g.moveTo(-10,4); g.lineTo(20,4); g.lineTo(18,46); g.lineTo(-12,46); }, accent);
+    body(()=>{ g.moveTo(-20,-10); g.lineTo(40,-10); g.lineTo(40,-26); g.lineTo(-20,-26); }, accent);
+  }
+  else if (kind === "bucky" || kind === "judge"){
+    // shotgun
+    body(()=>{
+      g.moveTo(-220,-10); g.lineTo(150,-10); g.lineTo(200,-22); g.lineTo(230,-22);
+      g.lineTo(230,-4);   g.lineTo(200,-4);  g.lineTo(150, 6);  g.lineTo( 60, 6);
+      g.lineTo( 50, 32);  g.lineTo(-30, 32); g.lineTo(-40, 6);  g.lineTo(-220,14);
+    }, base);
+    body(()=>{ g.arc(215,-13,7,0,Math.PI*2); }, glow);
+    body(()=>{ g.moveTo(-20,-10); g.lineTo(50,-10); g.lineTo(50,-22); g.lineTo(-20,-22); }, accent);
+  }
+  else if (kind === "ares" || kind === "odin"){
+    // LMG
+    body(()=>{
+      g.moveTo(-250,-12); g.lineTo(140,-12); g.lineTo(200,-26); g.lineTo(240,-26);
+      g.lineTo(240,-6);   g.lineTo(200,-6);  g.lineTo(140, 6);  g.lineTo( 60, 6);
+      g.lineTo( 60, 50);  g.lineTo(-30, 60); g.lineTo(-50, 6);  g.lineTo(-250,16);
+    }, base);
+    // belt drum
+    body(()=>{ g.arc(20, 30, 26, 0, Math.PI*2); }, accent);
+    body(()=>{ g.arc(20, 30, 14, 0, Math.PI*2); }, glow);
+    body(()=>{ g.moveTo(-40,-12); g.lineTo(40,-12); g.lineTo(40,-30); g.lineTo(-40,-30); }, accent);
+  }
+  else if (kind === "knife"){
+    // karambit-like curved blade
+    g.save();
+    g.translate(0,-10);
+    body(()=>{
+      g.moveTo(-90,40); g.bezierCurveTo(-30,-80, 90,-50, 130,30);
+      g.bezierCurveTo(80,0, 20,0, -50,55);
+    }, accent);
+    body(()=>{
+      g.moveTo(-90,40); g.lineTo(-130,55); g.lineTo(-130,75); g.lineTo(-50,75);
+      g.lineTo(-30,55);
+    }, base);
+    body(()=>{ g.arc(-110,65,8,0,Math.PI*2); }, glow);
+    g.restore();
+  }
+  else {
+    body(()=>{
+      g.moveTo(-150,-10); g.lineTo(150,-10); g.lineTo(160,10); g.lineTo(-160,10);
+    }, base);
+  }
+
+  // muzzle flash
+  if (state.flags.muzzle && (Date.now() % 1400) < 90){
+    const tip = (kind === "operator" || kind === "marshal" || kind === "outlaw") ? 260 :
+                (kind === "vandal"||kind==="phantom"||kind==="bulldog"||kind==="guardian") ? 220 :
+                (kind === "ares"||kind==="odin") ? 240 :
+                (kind === "stinger"||kind==="spectre") ? 180 :
+                (kind === "bucky"||kind==="judge") ? 230 :
+                (kind === "shorty") ? 110 :
+                140;
+    g.fillStyle = glow;
+    g.beginPath();
+    g.moveTo(tip, 0);
+    g.lineTo(tip+30, -16);
+    g.lineTo(tip+50,  0);
+    g.lineTo(tip+30,  16);
+    g.closePath();
+    g.fill();
+  }
+
+  // tracer (level 4+ only, like in-game upgrades)
+  if (state.flags.tracer && state.level >= 4){
+    const grad = g.createLinearGradient(220,0,800,0);
+    grad.addColorStop(0, glow);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    g.strokeStyle = grad; g.lineWidth = 3;
+    g.beginPath(); g.moveTo(220, -2); g.lineTo(800, -2); g.stroke();
+  }
+
+  g.restore();
+}
+
+/* main render loop */
+let last = performance.now(), fpsAcc = 0, fpsN = 0;
+function frame(t){
+  const dt = (t - last) / 1000; last = t;
+  fpsAcc += dt; fpsN += 1;
+  if (fpsAcc > 0.25){
+    state.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0;
+    document.getElementById("fps").textContent = state.fps;
+  }
+  if (state.rotate) state.rotAngle += dt * 0.4;
+  if (inspectAnim > 0) inspectAnim = Math.max(0, inspectAnim - dt);
+
+  if (stage.clientWidth*devicePixelRatio !== stage.width) resize();
+
+  const w = stage.width, h = stage.height;
+  sx.setTransform(1,0,0,1,0,0);
+  sx.clearRect(0,0,w,h);
+
+  // background sweep
+  const bg = sx.createLinearGradient(0,0,w,h);
+  bg.addColorStop(0, "#1d1d22");
+  bg.addColorStop(1, "#0d0d11");
+  sx.fillStyle = bg; sx.fillRect(0,0,w,h);
+
+  if (state.grid) drawGrid(sx, w, h);
+
+  sx.translate(w/2, h/2);
+  const z = state.zoom * (devicePixelRatio);
+  sx.scale(z, z);
+  // inspect "pop"
+  const insp = inspectAnim > 0 ? Math.sin((1 - inspectAnim)*Math.PI) * 0.15 : 0;
+  sx.scale(1 + insp, 1 + insp);
+  sx.rotate(state.rotAngle * (state.rotate ? 1 : 0) * 0.4
+            + state.dragRot
+            + (inspectAnim > 0 ? (1-inspectAnim) * Math.PI*2 * 0.2 : 0));
+
+  drawWeapon(sx, state.weapon, currentChroma());
+
+  // floor reflection
+  sx.save();
+  sx.globalAlpha = 0.18;
+  sx.scale(1, -0.5);
+  sx.translate(0, -120);
+  drawWeapon(sx, state.weapon, currentChroma());
+  sx.restore();
+
+  state.draws++;
+  document.getElementById("draws").textContent = state.draws;
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================
+ * Boot
+ * ========================================================= */
+buildCategories();
+buildSkins();
+refreshProps();
+updateCard();
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
